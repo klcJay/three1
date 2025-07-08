@@ -3,29 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Refracting Custom Model with Chromatic Aberration</title>
+    <title>Refracting Custom Model with 360 Video</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; }
-        #video-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            z-index: -1;
-        }
-        #video {
-            min-width: 100%;
-            min-height: 100%;
-            width: auto;
-            height: auto;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-        }
+        /* The video element is no longer directly visible */
+        #video-container { display: none; }
         #message {
             position: absolute;
             top: 50%;
@@ -49,6 +32,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <script>
         // --- Scene Setup ---
@@ -60,14 +44,20 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
+        // --- Controls ---
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableZoom = false; // Optional: disable zooming
+        controls.enablePan = false;  // Optional: disable panning
+        controls.rotateSpeed = -0.25; // Invert rotation direction for a more natural feel
+
         // --- Video and Material Setup ---
         const video = document.getElementById('video');
         const message = document.getElementById('message');
         let videoTexture;
-        let customModel; // Changed from dodecahedron
+        let customModel;
         let cubeCamera, cubeRenderTarget;
 
-        // --- Custom Shaders for Refraction and Chromatic Aberration ---
+        // --- Custom Shaders ---
         const vertexShader = `
             varying vec3 vWorldPosition;
             varying vec3 vNormal;
@@ -84,7 +74,7 @@
             varying vec3 vWorldPosition;
             varying vec3 vNormal;
             uniform samplerCube tCube;
-            uniform float ior; // Index of Refraction
+            uniform float ior;
             uniform float aberrationStrength;
 
             void main() {
@@ -107,13 +97,38 @@
         `;
 
         function initializeSceneObjects() {
-            if (videoTexture) return; // Exit if already initialized
+            if (videoTexture) return;
 
             videoTexture = new THREE.VideoTexture(video);
-            scene.background = videoTexture;
+            
+            // --- Create a sphere for the 360 video background ---
+            const sphereGeometry = new THREE.SphereGeometry(500, 60, 40);
+            // Invert the geometry on the x-axis so that the faces point inward
+            sphereGeometry.scale(-1, 1, 1);
+            
+            const sphereMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
+            const videoSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+            scene.add(videoSphere);
+
+            // The scene's background is no longer the video texture directly
+            // It is now the sphere that contains the video
+            scene.background = null; 
 
             cubeRenderTarget = new THREE.WebGLCubeRenderTarget(1024);
             cubeCamera = new THREE.CubeCamera(1, 1000, cubeRenderTarget);
+            
+            // Set the background of the cube camera to be the video texture for refraction
+            cubeCamera.renderTarget.texture.format = THREE.RGBAFormat;
+            const cubeBackground = new THREE.MeshBasicMaterial({
+                map: videoTexture,
+                side: THREE.BackSide
+            });
+            const cubeSphere = new THREE.Mesh(new THREE.SphereGeometry(500, 60, 40), cubeBackground);
+            const cubeScene = new THREE.Scene();
+            cubeScene.add(cubeSphere);
+            cubeCamera.update = (renderer, scene) => {
+                renderer.render(cubeScene, cubeCamera);
+            };
 
             const shaderMaterial = new THREE.ShaderMaterial({
                 vertexShader: vertexShader,
@@ -129,7 +144,7 @@
             // --- Load Custom Model ---
             const loader = new THREE.GLTFLoader();
             loader.load(
-                'models/w.glb', // Path to your model
+                'models/w.glb',
                 function (gltf) {
                     customModel = gltf.scene;
                     customModel.traverse((node) => {
@@ -137,14 +152,12 @@
                             node.material = shaderMaterial;
                         }
                     });
-                    // You might need to adjust scale, position, or rotation
                     customModel.scale.set(1.5, 1.5, 1.5);
                     scene.add(customModel);
                 },
-                undefined, // onProgress callback (optional)
+                undefined,
                 function (error) {
                     console.error('An error happened while loading the model:', error);
-                    // You could display an error message to the user here
                 }
             );
         }
@@ -193,8 +206,11 @@
         // --- Animation Loop ---
         function animate() {
             requestAnimationFrame(animate);
+            
+            // Update controls for 360 navigation
+            controls.update();
 
-            if (customModel && videoTexture) { // Check for customModel instead of dodecahedron
+            if (customModel && videoTexture) {
                 customModel.visible = false;
                 cubeCamera.update(renderer, scene);
                 customModel.visible = true;
