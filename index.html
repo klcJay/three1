@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Refracting Dodecahedron with Chromatic Aberration</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+        #video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: -1;
+        }
+        #video {
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: sans-serif;
+            font-size: 1.5em;
+            text-align: center;
+            display: none;
+            pointer-events: none;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+        }
+    </style>
+</head>
+<body>
+    <div id="video-container">
+        <video id="video" loop muted autoplay playsinline crossOrigin="anonymous" src="https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" onerror="this.src='https://placehold.co/1920x1080/000000/ffffff?text=Video+Not+Found'"></video>
+    </div>
+    <div id="message">Click or tap to start</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Video and Material Setup ---
+        const video = document.getElementById('video');
+        const message = document.getElementById('message');
+        let videoTexture;
+        let dodecahedron;
+        let cubeCamera, cubeRenderTarget;
+
+        // --- Custom Shaders for Refraction and Chromatic Aberration ---
+        const vertexShader = `
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+
+            void main() {
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            varying vec3 vWorldPosition;
+            varying vec3 vNormal;
+            uniform samplerCube tCube;
+            uniform float ior; // Index of Refraction
+            uniform float aberrationStrength;
+
+            void main() {
+                // Calculate the view direction
+                vec3 I = normalize(vWorldPosition - cameraPosition);
+                
+                // Define IOR for each color channel to simulate chromatic aberration
+                float iorR = ior;
+                float iorG = ior + (aberrationStrength * 0.01);
+                float iorB = ior + (aberrationStrength * 0.02);
+
+                // Calculate refracted vectors for each color channel
+                vec3 refractR = refract(I, vNormal, 1.0 / iorR);
+                vec3 refractG = refract(I, vNormal, 1.0 / iorG);
+                vec3 refractB = refract(I, vNormal, 1.0 / iorB);
+
+                // Sample the cube map with the different refraction vectors
+                vec4 colorR = textureCube(tCube, refractR);
+                vec4 colorG = textureCube(tCube, refractG);
+                vec4 colorB = textureCube(tCube, refractB);
+
+                // Combine the channels to create the final color with aberration
+                gl_FragColor = vec4(colorR.r, colorG.g, colorB.b, 1.0);
+            }
+        `;
+
+
+        function initializeSceneObjects() {
+            if (!videoTexture) {
+                videoTexture = new THREE.VideoTexture(video);
+                scene.background = videoTexture; // Use the video as the scene background
+
+                // Create a CubeCamera to capture the environment (the video background)
+                cubeRenderTarget = new THREE.WebGLCubeRenderTarget(1024);
+                cubeCamera = new THREE.CubeCamera(1, 1000, cubeRenderTarget);
+
+                const shaderMaterial = new THREE.ShaderMaterial({
+                    vertexShader: vertexShader,
+                    fragmentShader: fragmentShader,
+                    uniforms: {
+                        tCube: { value: cubeRenderTarget.texture },
+                        cameraPosition: { value: camera.position },
+                        ior: { value: 1.3 }, // Index of Refraction for glass-like effect
+                        aberrationStrength: { value: 1.5 } // Controls the intensity of color separation
+                    }
+                });
+
+                const geometry = new THREE.DodecahedronGeometry(2, 0);
+                dodecahedron = new THREE.Mesh(geometry, shaderMaterial);
+                scene.add(dodecahedron);
+            }
+        }
+
+        // --- Video Playback Handling ---
+        let playPromise = video.play();
+        if (playPromise !== undefined) {
+            playPromise.then(() => {
+                initializeSceneObjects();
+            }).catch(error => {
+                console.warn("Video autoplay was blocked. Waiting for user interaction.", error);
+                message.style.display = 'block';
+                document.body.addEventListener('click', handleInteraction, { once: true });
+                document.body.addEventListener('touchstart', handleInteraction, { once: true });
+            });
+        }
+
+        function handleInteraction() {
+            message.style.display = 'none';
+            video.play().then(() => {
+                initializeSceneObjects();
+            }).catch(err => {
+                console.error("Failed to play video even after interaction.", err);
+                message.innerText = "Could not play video.";
+                message.style.display = 'block';
+            });
+        }
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0xffffff, 0.5);
+        pointLight.position.set(5, 5, 5);
+        scene.add(pointLight);
+
+        // --- Mouse Interaction & Rotation ---
+        const minRotationSpeed = 0.00125; // Slower resting speed
+        const maxRotationSpeed = 0.02;
+        let currentRotationSpeed = minRotationSpeed;
+
+        // This function now just sets the speed to max on any mouse movement.
+        function onMouseMove(event) {
+            currentRotationSpeed = maxRotationSpeed;
+        }
+        window.addEventListener('mousemove', onMouseMove, false);
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (dodecahedron) {
+                // Update the environment map captured by the CubeCamera
+                dodecahedron.visible = false; // Hide object before capture
+                cubeCamera.update(renderer, scene);
+                dodecahedron.visible = true; // Make it visible again for rendering
+
+                // Apply the current rotation speed
+                dodecahedron.rotation.x += currentRotationSpeed;
+                dodecahedron.rotation.y += currentRotationSpeed;
+
+                // Gradually slow down the rotation speed back to the minimum using linear interpolation (lerp)
+                // This creates a smooth deceleration effect.
+                currentRotationSpeed += (minRotationSpeed - currentRotationSpeed) * 0.05;
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- Window Resize ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        window.addEventListener('resize', onWindowResize, false);
+
+    </script>
+</body>
+</html>
