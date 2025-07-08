@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Refracting Dodecahedron with Chromatic Aberration</title>
+    <title>Refracting Custom Model with Chromatic Aberration</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; }
@@ -48,6 +48,8 @@
     <div id="message">Click or tap to start</div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
     <script>
         // --- Scene Setup ---
         const scene = new THREE.Scene();
@@ -62,7 +64,7 @@
         const video = document.getElementById('video');
         const message = document.getElementById('message');
         let videoTexture;
-        let dodecahedron;
+        let customModel; // Changed from dodecahedron
         let cubeCamera, cubeRenderTarget;
 
         // --- Custom Shaders for Refraction and Chromatic Aberration ---
@@ -86,54 +88,65 @@
             uniform float aberrationStrength;
 
             void main() {
-                // Calculate the view direction
                 vec3 I = normalize(vWorldPosition - cameraPosition);
                 
-                // Define IOR for each color channel to simulate chromatic aberration
                 float iorR = ior;
                 float iorG = ior + (aberrationStrength * 0.01);
                 float iorB = ior + (aberrationStrength * 0.02);
 
-                // Calculate refracted vectors for each color channel
                 vec3 refractR = refract(I, vNormal, 1.0 / iorR);
                 vec3 refractG = refract(I, vNormal, 1.0 / iorG);
                 vec3 refractB = refract(I, vNormal, 1.0 / iorB);
 
-                // Sample the cube map with the different refraction vectors
                 vec4 colorR = textureCube(tCube, refractR);
                 vec4 colorG = textureCube(tCube, refractG);
                 vec4 colorB = textureCube(tCube, refractB);
 
-                // Combine the channels to create the final color with aberration
                 gl_FragColor = vec4(colorR.r, colorG.g, colorB.b, 1.0);
             }
         `;
 
-
         function initializeSceneObjects() {
-            if (!videoTexture) {
-                videoTexture = new THREE.VideoTexture(video);
-                scene.background = videoTexture; // Use the video as the scene background
+            if (videoTexture) return; // Exit if already initialized
 
-                // Create a CubeCamera to capture the environment (the video background)
-                cubeRenderTarget = new THREE.WebGLCubeRenderTarget(1024);
-                cubeCamera = new THREE.CubeCamera(1, 1000, cubeRenderTarget);
+            videoTexture = new THREE.VideoTexture(video);
+            scene.background = videoTexture;
 
-                const shaderMaterial = new THREE.ShaderMaterial({
-                    vertexShader: vertexShader,
-                    fragmentShader: fragmentShader,
-                    uniforms: {
-                        tCube: { value: cubeRenderTarget.texture },
-                        cameraPosition: { value: camera.position },
-                        ior: { value: 1.3 }, // Index of Refraction for glass-like effect
-                        aberrationStrength: { value: 1.5 } // Controls the intensity of color separation
-                    }
-                });
+            cubeRenderTarget = new THREE.WebGLCubeRenderTarget(1024);
+            cubeCamera = new THREE.CubeCamera(1, 1000, cubeRenderTarget);
 
-                const geometry = new THREE.DodecahedronGeometry(2, 0);
-                dodecahedron = new THREE.Mesh(geometry, shaderMaterial);
-                scene.add(dodecahedron);
-            }
+            const shaderMaterial = new THREE.ShaderMaterial({
+                vertexShader: vertexShader,
+                fragmentShader: fragmentShader,
+                uniforms: {
+                    tCube: { value: cubeRenderTarget.texture },
+                    cameraPosition: { value: camera.position },
+                    ior: { value: 1.3 },
+                    aberrationStrength: { value: 1.5 }
+                }
+            });
+
+            // --- Load Custom Model ---
+            const loader = new THREE.GLTFLoader();
+            loader.load(
+                'models/w.glb', // Path to your model
+                function (gltf) {
+                    customModel = gltf.scene;
+                    customModel.traverse((node) => {
+                        if (node.isMesh) {
+                            node.material = shaderMaterial;
+                        }
+                    });
+                    // You might need to adjust scale, position, or rotation
+                    customModel.scale.set(1.5, 1.5, 1.5);
+                    scene.add(customModel);
+                },
+                undefined, // onProgress callback (optional)
+                function (error) {
+                    console.error('An error happened while loading the model:', error);
+                    // You could display an error message to the user here
+                }
+            );
         }
 
         // --- Video Playback Handling ---
@@ -168,11 +181,10 @@
         scene.add(pointLight);
 
         // --- Mouse Interaction & Rotation ---
-        const minRotationSpeed = 0.00125; // Slower resting speed
+        const minRotationSpeed = 0.00125;
         const maxRotationSpeed = 0.02;
         let currentRotationSpeed = minRotationSpeed;
 
-        // This function now just sets the speed to max on any mouse movement.
         function onMouseMove(event) {
             currentRotationSpeed = maxRotationSpeed;
         }
@@ -182,18 +194,14 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            if (dodecahedron) {
-                // Update the environment map captured by the CubeCamera
-                dodecahedron.visible = false; // Hide object before capture
+            if (customModel && videoTexture) { // Check for customModel instead of dodecahedron
+                customModel.visible = false;
                 cubeCamera.update(renderer, scene);
-                dodecahedron.visible = true; // Make it visible again for rendering
+                customModel.visible = true;
 
-                // Apply the current rotation speed
-                dodecahedron.rotation.x += currentRotationSpeed;
-                dodecahedron.rotation.y += currentRotationSpeed;
+                customModel.rotation.x += currentRotationSpeed;
+                customModel.rotation.y += currentRotationSpeed;
 
-                // Gradually slow down the rotation speed back to the minimum using linear interpolation (lerp)
-                // This creates a smooth deceleration effect.
                 currentRotationSpeed += (minRotationSpeed - currentRotationSpeed) * 0.05;
             }
 
@@ -208,7 +216,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
         window.addEventListener('resize', onWindowResize, false);
-
     </script>
 </body>
 </html>
