@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Refracting Custom Scene with Pivot Fix</title>
+    <title>Refracting Scene with Depth of Field</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; cursor: default; }
@@ -32,6 +32,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
+
     <script>
         // --- Scene Setup ---
         const scene = new THREE.Scene();
@@ -42,10 +48,14 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
         
+        // --- Post-Processing Setup ---
+        let composer;
+        let bokehPass;
+
         // --- Config ---
         const modelScale = 25;
 
-        // --- Mouse Tracking for Camera Rotation ---
+        // --- Mouse Tracking ---
         let mouseX = 0;
         let mouseY = 0;
         let targetRotationX = 0;
@@ -65,7 +75,7 @@
         let cubeCamera, cubeRenderTarget;
         let shaderMaterial;
 
-        // --- Custom Shaders (Unchanged) ---
+        // --- Shaders ---
         const vertexShader = `
             varying vec3 vWorldPosition;
             varying vec3 vNormal;
@@ -99,89 +109,73 @@
 
         function initializeSceneObjects() {
             if (videoTexture) return;
-
             videoTexture = new THREE.VideoTexture(video);
-
             const sphereGeometry = new THREE.SphereGeometry(500, 60, 40);
             sphereGeometry.scale(-1, 1, 1);
-            
             const sphereMaterial = new THREE.MeshBasicMaterial({ map: videoTexture });
             const videoSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
             scene.add(videoSphere);
-
             scene.background = null; 
-
             cubeRenderTarget = new THREE.WebGLCubeRenderTarget(1024);
             cubeCamera = new THREE.CubeCamera(1, 1000, cubeRenderTarget);
-
             shaderMaterial = new THREE.ShaderMaterial({
                 vertexShader: vertexShader,
                 fragmentShader: fragmentShader,
                 uniforms: {
                     tCube: { value: cubeRenderTarget.texture },
                     cameraPosition: { value: camera.position },
-                    ior: { value: 1.1 }, // 1.3
-                    aberrationStrength: { value: 0.3 }	// 1.5
+                    ior: { value: 1.1 },
+                    aberrationStrength: { value: 0.3 }
                 }
             });
             
             const loader = new THREE.GLTFLoader();
             loader.load('models/layout.glb', (gltf) => {
                 const layoutScene = gltf.scene;
-
                 layoutScene.scale.set(modelScale, modelScale, modelScale);
-
                 layoutScene.traverse((node) => {
                     if (node.isMesh) {
-                        // --- CORRECTED PIVOT FIX ---
-                        // A. Compute the bounding box of the geometry in its own local space
                         node.geometry.computeBoundingBox();
-                        
-                        // B. Get the center of this local bounding box
                         const center = new THREE.Vector3();
                         node.geometry.boundingBox.getCenter(center);
-
-                        // C. Translate the geometry so its center is at the origin
                         node.geometry.translate(-center.x, -center.y, -center.z);
-
-                        // D. Update the mesh's position to compensate for the geometry translation
                         node.position.add(center);
-
                         node.material = shaderMaterial;
                         models.push(node);
                     }
                 });
-                
                 scene.add(layoutScene);
-            }, 
-            undefined,
-            (error) => {
-                console.error('An error happened while loading the layout GLB:', error);
             });
+
+            // --- Initialize Post-Processing ---
+            const renderPass = new THREE.RenderPass(scene, camera);
+            bokehPass = new THREE.BokehPass(scene, camera, {
+                // --- ADJUST DEPTH OF FIELD HERE ---
+                focus: 4,        // Distance to the point of focus 4
+                aperture: 0.007,   // Higher = more blur 0.005,
+                maxblur: .05,     // Maximum blur amount  0.01
+                width: window.innerWidth,
+                height: window.innerHeight
+            });
+
+            composer = new THREE.EffectComposer(renderer);
+            composer.addPass(renderPass);
+            composer.addPass(bokehPass);
         }
 
         // --- Video Playback Handling (Unchanged) ---
         let playPromise = video.play();
         if (playPromise !== undefined) {
-            playPromise.then(() => {
-                initializeSceneObjects();
-            }).catch(error => {
+            playPromise.then(() => initializeSceneObjects()).catch(error => {
                 console.warn("Video autoplay was blocked. Waiting for user interaction.", error);
                 message.style.display = 'block';
                 document.body.addEventListener('click', handleInteraction, { once: true });
                 document.body.addEventListener('touchstart', handleInteraction, { once: true });
             });
         }
-
         function handleInteraction() {
             message.style.display = 'none';
-            video.play().then(() => {
-                initializeSceneObjects();
-            }).catch(err => {
-                console.error("Failed to play video even after interaction.", err);
-                message.innerText = "Could not play video.";
-                message.style.display = 'block';
-            });
+            video.play().then(() => initializeSceneObjects());
         }
 
         // --- Lighting (Unchanged) ---
@@ -191,40 +185,44 @@
         pointLight.position.set(5, 5, 5);
         scene.add(pointLight);
 
-        // --- Animation Loop (Unchanged) ---
+        // --- Animation Loop ---
         const constantRotationSpeed = 0.0001;
-
         function animate() {
             requestAnimationFrame(animate);
-
             targetRotationX = mouseX * 0.4;
             targetRotationY = mouseY * 0.2;
-
             camera.rotation.y += (targetRotationX - camera.rotation.y) * 0.05;
             camera.rotation.x += (targetRotationY - camera.rotation.x) * 0.05;
 
             if (models.length > 0) {
                 models.forEach(model => model.visible = false);
-                
                 cubeCamera.update(renderer, scene);
-                
                 models.forEach(model => model.visible = true);
-
                 models.forEach((model, i) => {
-                    model.rotation.x += constantRotationSpeed * (i % 2 === 0 ? 1 : -1)*10;
-                    model.rotation.y += constantRotationSpeed * (i * 0.3 + 1)*10;
+                    model.rotation.x += constantRotationSpeed * (i % 2 === 0 ? 1 : -1) * 10;
+                    model.rotation.y += constantRotationSpeed * (i * 0.3 + 1) * 10;
                 });
             }
 
-            renderer.render(scene, camera);
+            // --- Render using the composer ---
+            if (composer) {
+                composer.render();
+            } else {
+                renderer.render(scene, camera); // Fallback for before initialization
+            }
         }
         animate();
 
-        // --- Window Resize (Unchanged) ---
+        // --- Window Resize ---
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            // Update composer and pass on resize
+            if (composer) {
+                composer.setSize(window.innerWidth, window.innerHeight);
+                bokehPass.uniforms['aspect'].value = camera.aspect;
+            }
         }
         window.addEventListener('resize', onWindowResize, false);
     </script>
