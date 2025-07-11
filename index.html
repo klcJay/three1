@@ -25,7 +25,7 @@
 </head>
 <body>
     <div id="video-container">
-        <video id="video" loop muted autoplay playsinline crossOrigin="anonymous" src="videos/KauriForest360_3s.mp4" onerror="this.src='https://placehold.co/1920x1080/000000/ffffff?text=Video+Not+Found'"></video>
+        <video id="video" loop muted autoplay playsinline crossOrigin="anonymous" src="videos/waxeye.mp4" onerror="this.src='https://placehold.co/1920x1080/000000/ffffff?text=Video+Not+Found'"></video>
     </div>
     <div id="message">Click or tap to start</div>
 
@@ -43,7 +43,7 @@
         document.body.appendChild(renderer.domElement);
         
         // --- Config ---
-        const modelScale = 15;
+        const modelScale = 25;
 
         // --- Mouse Tracking for Camera Rotation ---
         let mouseX = 0;
@@ -121,7 +121,7 @@
                     tCube: { value: cubeRenderTarget.texture },
                     cameraPosition: { value: camera.position },
                     ior: { value: 1.1 }, // 1.3
-                    aberrationStrength: { value: 0.2 }	// 1.5
+                    aberrationStrength: { value: 0.3 }	// 1.5
                 }
             });
             
@@ -192,7 +192,7 @@
         scene.add(pointLight);
 
         // --- Animation Loop (Unchanged) ---
-        const constantRotationSpeed = 0.001;
+        const constantRotationSpeed = 0.0001;
 
         function animate() {
             requestAnimationFrame(animate);
@@ -211,8 +211,8 @@
                 models.forEach(model => model.visible = true);
 
                 models.forEach((model, i) => {
-                    model.rotation.x += constantRotationSpeed * (i % 2 === 0 ? 1 : -1);
-                    model.rotation.y += constantRotationSpeed * (i * 0.3 + 1);
+                    model.rotation.x += constantRotationSpeed * (i % 2 === 0 ? 1 : -1)*10;
+                    model.rotation.y += constantRotationSpeed * (i * 0.3 + 1)*10;
                 });
             }
 
