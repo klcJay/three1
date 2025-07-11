@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Refracting Scene with Depth of Field</title>
+    <title>Refracting Scene with Interactive Particles</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; cursor: default; }
@@ -31,7 +31,6 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
@@ -39,7 +38,6 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
 
     <script>
-        // --- Scene Setup ---
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.z = 9;
@@ -48,26 +46,19 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
         
-        // --- Post-Processing Setup ---
-        let composer;
-        let bokehPass;
+        let composer, bokehPass;
+        const modelScale = 18;
 
-        // --- Config ---
-        const modelScale = 18;	//25;
-
-        // --- Mouse Tracking ---
-        let mouseX = 0;
-        let mouseY = 0;
-        let targetRotationX = 0;
-        let targetRotationY = 0;
-
-        function onDocumentMouseMove(event) {
+        let mouseX = 0, mouseY = 0, targetRotationX = 0, targetRotationY = 0;
+        document.addEventListener('mousemove', (event) => {
             mouseX = (event.clientX / window.innerWidth) * 2 - 1;
             mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-        }
-        document.addEventListener('mousemove', onDocumentMouseMove);
+        });
 
-        // --- Video and Material Setup ---
+        // --- Particle System ---
+        const particles = [];
+        let raycaster, mouse;
+
         const video = document.getElementById('video');
         const message = document.getElementById('message');
         let videoTexture;
@@ -75,7 +66,6 @@
         let cubeCamera, cubeRenderTarget;
         let shaderMaterial;
 
-        // --- Shaders ---
         const vertexShader = `
             varying vec3 vWorldPosition;
             varying vec3 vNormal;
@@ -147,27 +137,72 @@
                 scene.add(layoutScene);
             });
 
-            // --- Initialize Post-Processing ---
             const renderPass = new THREE.RenderPass(scene, camera);
             bokehPass = new THREE.BokehPass(scene, camera, {
-                // --- ADJUST DEPTH OF FIELD HERE ---
-                focus: 4,        // Distance to the point of focus 4
-                aperture: 0.007,   // Higher = more blur 0.005,
-                maxblur: .09,     // Maximum blur amount  0.01
-                width: window.innerWidth,
-                height: window.innerHeight
+                focus: 4, aperture: 0.007, maxblur: .09,
+                width: window.innerWidth, height: window.innerHeight
             });
-
             composer = new THREE.EffectComposer(renderer);
             composer.addPass(renderPass);
             composer.addPass(bokehPass);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
         }
 
-        // --- Video Playback Handling (Unchanged) ---
+        function onPointerDown(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObjects(models);
+            if (intersects.length > 0) {
+                createParticles(intersects[0].point);
+            }
+        }
+
+        function createParticles(position) {
+            // --- ADJUST PARTICLE SIZE HERE ---
+            const particleStartSize = 4; // <-- Make this number bigger or smaller
+
+            const count = 20;
+            // The geometry is now a standard size; we control the final size with scaling
+            const triangleGeom = new THREE.CircleGeometry(0.5, 3); 
+
+            for (let i = 0; i < count; i++) {
+                const particleMesh = new THREE.Mesh(triangleGeom, shaderMaterial);
+                particleMesh.position.copy(position);
+                
+                // Set the initial scale using our constant
+                particleMesh.scale.setScalar(particleStartSize);
+
+                particleMesh.rotation.set(
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2
+                );
+
+                const particle = {
+                    mesh: particleMesh,
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.01), 
+                        (Math.random() - 0.01), 
+                        (Math.random() - 0.01)
+                    ).normalize(),
+                    lifespan: 3.0, // Lifespan is now a 0-1 percentage
+                    initialSize: particleStartSize
+                };
+                
+                particles.push(particle);
+                scene.add(particle.mesh);
+            }
+        }
+        
         let playPromise = video.play();
         if (playPromise !== undefined) {
             playPromise.then(() => initializeSceneObjects()).catch(error => {
-                console.warn("Video autoplay was blocked. Waiting for user interaction.", error);
                 message.style.display = 'block';
                 document.body.addEventListener('click', handleInteraction, { once: true });
                 document.body.addEventListener('touchstart', handleInteraction, { once: true });
@@ -178,14 +213,12 @@
             video.play().then(() => initializeSceneObjects());
         }
 
-        // --- Lighting (Unchanged) ---
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambientLight);
         const pointLight = new THREE.PointLight(0xffffff, 0.5);
         pointLight.position.set(5, 5, 5);
         scene.add(pointLight);
 
-        // --- Animation Loop ---
         const constantRotationSpeed = 0.0001;
         function animate() {
             requestAnimationFrame(animate);
@@ -193,6 +226,25 @@
             targetRotationY = mouseY * 0.2;
             camera.rotation.y += (targetRotationX - camera.rotation.y) * 0.05;
             camera.rotation.x += (targetRotationY - camera.rotation.x) * 0.05;
+
+            // --- Update Particles ---
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const particle = particles[i];
+
+                particle.mesh.position.addScaledVector(particle.velocity, 0.01);
+                
+                // Reduce lifespan (from 1 down to 0)
+                particle.lifespan -= 0.015;
+
+                // Scale down based on remaining lifespan percentage
+                particle.mesh.scale.setScalar(particle.initialSize * particle.lifespan);
+
+                if (particle.lifespan <= 0) {
+                    scene.remove(particle.mesh);
+                    if(particle.mesh.geometry) particle.mesh.geometry.dispose(); 
+                    particles.splice(i, 1);
+                }
+            }
 
             if (models.length > 0) {
                 models.forEach(model => model.visible = false);
@@ -204,21 +256,18 @@
                 });
             }
 
-            // --- Render using the composer ---
             if (composer) {
                 composer.render();
             } else {
-                renderer.render(scene, camera); // Fallback for before initialization
+                renderer.render(scene, camera);
             }
         }
         animate();
 
-        // --- Window Resize ---
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            // Update composer and pass on resize
             if (composer) {
                 composer.setSize(window.innerWidth, window.innerHeight);
                 bokehPass.uniforms['aspect'].value = camera.aspect;
