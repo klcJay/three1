@@ -139,7 +139,7 @@
 
             const renderPass = new THREE.RenderPass(scene, camera);
             bokehPass = new THREE.BokehPass(scene, camera, {
-                focus: 4, aperture: 0.007, maxblur: .09,
+                focus: 4, aperture: 0.002, maxblur: .09,
                 width: window.innerWidth, height: window.innerHeight
             });
             composer = new THREE.EffectComposer(renderer);
