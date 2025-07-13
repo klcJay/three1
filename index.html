@@ -153,6 +153,14 @@
         }
 
         function onPointerDown(event) {
+            // Toggle video state on any click/tap
+            if (video.paused) {
+                video.play();
+            } else {
+                video.pause();
+            }
+
+            // Original particle creation logic
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
@@ -231,7 +239,7 @@
             for (let i = particles.length - 1; i >= 0; i--) {
                 const particle = particles[i];
 
-                particle.mesh.position.addScaledVector(particle.velocity, 0.01);
+                particle.mesh.position.addScaledVector(particle.velocity, 0.02);
                 
                 // Reduce lifespan (from 1 down to 0)
                 particle.lifespan -= 0.015;
