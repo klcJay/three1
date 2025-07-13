@@ -222,8 +222,8 @@
         const constantRotationSpeed = 0.0001;
         function animate() {
             requestAnimationFrame(animate);
-            targetRotationX = mouseX * 0.4;
-            targetRotationY = mouseY * 0.2;
+            targetRotationX = mouseX * 0.8;	//0.4;
+            targetRotationY = mouseY * 0.4; //0.2;
             camera.rotation.y += (targetRotationX - camera.rotation.y) * 0.05;
             camera.rotation.x += (targetRotationY - camera.rotation.x) * 0.05;
 
